@@ -256,6 +256,7 @@ def main():
         result = result[~ip_mask]
 
         click.echo("Printing danglind DNS records:")
+        found_results = False
         for i in result.index:
             if result["value"][i] == "":
                 click.echo(
@@ -268,6 +269,8 @@ def main():
                     + " cloud in the account/subscription/project - "
                     + str(result["account_x"][i])
                 )
+                found_results = True
+        exit(code=found_results)
     else:
         print(
             "To check for dangling domains, both DNS and Infrastructure provider needs to be configured."
