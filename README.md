@@ -17,6 +17,8 @@ There are depencies that are required to be installed based on the cloud provide
 ```
 git clone https://github.com/anirudhbiyani/findmytakeover.git
 cd findmytakeover/
+python3 -m venv findmytakeover
+source findmytakeover/bin/activate
 pip3 install -r requirements.txt
 ```
 
