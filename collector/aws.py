@@ -26,34 +26,34 @@ class aws:
                 response = client.list_hosted_zones()["HostedZones"]
 
                 for i in response:
-                    if i["Config"]["PrivateZone"] is False:
-                        record = client.list_resource_record_sets(HostedZoneId=i["Id"])[
-                            "ResourceRecordSets"
-                        ]
-                        for j in record:
-                            if (
-                                j["Type"] == "A"
-                                or j["Type"] == "AAAA"
-                                or j["Type"] == "CNAME"
-                            ):
-                                if j.get("ResourceRecords") is not None:
-                                    for k in j.get("ResourceRecords"):
-                                        dnsdata.append(
-                                            [
-                                                aws_account,
-                                                clean_dns(j["Name"]),
-                                                clean_dns(k["Value"]),
-                                            ]
-                                        )
-
-                                if j.get("AliasTarget") is not None:
+                    # if i["Config"]["PrivateZone"] is False:
+                    record = client.list_resource_record_sets(HostedZoneId=i["Id"])[
+                        "ResourceRecordSets"
+                    ]
+                    for j in record:
+                        if (
+                            j["Type"] == "A"
+                            or j["Type"] == "AAAA"
+                            or j["Type"] == "CNAME"
+                        ):
+                            if j.get("ResourceRecords") is not None:
+                                for k in j.get("ResourceRecords"):
                                     dnsdata.append(
                                         [
                                             aws_account,
                                             clean_dns(j["Name"]),
-                                            clean_dns(j.get("AliasTarget")["DNSName"]),
+                                            clean_dns(k["Value"]),
                                         ]
                                     )
+
+                            if j.get("AliasTarget") is not None:
+                                dnsdata.append(
+                                    [
+                                        aws_account,
+                                        clean_dns(j["Name"]),
+                                        clean_dns(j.get("AliasTarget")["DNSName"]),
+                                    ]
+                                )
             else:
                 click.echo(
                     f"Please check the AWS Account number {aws_account}. It does seem to be invalid."
@@ -76,33 +76,28 @@ class aws:
 
                 for r in regions:
                     try:
-                        ec2_client = boto3.client(
+                        client = boto3.client(
                             "ec2",
                             aws_access_key_id=credentials["AccessKeyId"],
                             aws_secret_access_key=credentials["SecretAccessKey"],
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        addresses_dict = ec2_client.describe_instances()
+                        paginator = client.get_paginator('describe_instances')
+
+                        for page in paginator.paginate():
                         try:
-                            for i in addresses_dict["Reservations"]:
-                                for j in i["Instances"]:
-                                    for b in j["NetworkInterfaces"]:
-                                        if "Association" in b:
-                                            infradata.append(
-                                                [
-                                                    aws_account,
-                                                    "ec2-ip",
-                                                    b["Association"]["PublicIp"],
-                                                ]
-                                            )
-                                            infradata.append(
-                                                [
-                                                    aws_account,
-                                                    "ec2-ip",
-                                                    b["Association"]["PublicDnsName"],
-                                                ]
-                                            )
+                            for reservation in page.get("Reservations", []):
+                                for instance in reservation.get("Instances", []):
+                                    for network_interface in instance.get("NetworkInterfaces", []):
+                                        association = network_interface.get("Association")
+                                        if association:
+                                            public_ip = association.get("PublicIp")
+                                            public_dns_name = association.get("PublicDnsName")
+                                            if public_ip:
+                                                infradata.append([aws_account, "ec2-ip", public_ip])
+                                            if public_dns_name:
+                                                infradata.append([aws_account, "ec2-ip", public_dns_name])
                         except KeyError:
                             pass
 
@@ -199,9 +194,9 @@ class aws:
                         except KeyError:
                             pass
 
-                        response = client.describe_db_clusters()
+                        response = client.describe_db_cluster_endpoints()
                         try:
-                            for i in response["DBClusters"]:
+                            for i in response["DBClusterEndpoints"]:
                                 infradata.append(
                                     [
                                         aws_account,
@@ -209,22 +204,6 @@ class aws:
                                         clean_dns(i["Endpoint"]),
                                     ]
                                 )
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "rds",
-                                        clean_dns(i["ReaderEndpoint"]),
-                                    ]
-                                )
-                                for ce in i["CustomEndpoints"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "rds",
-                                            clean_dns(ce),
-                                        ]
-                                    )
-
                         except KeyError:
                             pass
 
@@ -339,6 +318,112 @@ class aws:
                         except KeyError:
                             pass
 
+                        # Collect redshift server Address
+                        client = boto3.client(
+                            "redshift",
+                            aws_access_key_id=credentials["AccessKeyId"],
+                            aws_secret_access_key=credentials["SecretAccessKey"],
+                            aws_session_token=credentials["SessionToken"],
+                            region_name=r,
+                        )
+                        try:
+                            for c in client.describe_clusters()["Clusters"]:
+                                infradata.append(
+                                    [
+                                        aws_account,
+                                        "redshift",
+                                        c["Endpoint"]["Address"],
+                                    ]
+                                )
+                        except KeyError:
+                            pass
+
+                        # Collect redshift serverless Address
+                        client = boto3.client(
+                            "redshift-serverless",
+                            aws_access_key_id=credentials["AccessKeyId"],
+                            aws_secret_access_key=credentials["SecretAccessKey"],
+                            aws_session_token=credentials["SessionToken"],
+                            region_name=r,
+                        )
+                        try:
+                            for c in client.list_workgroups()["workgroups"]:
+                                infradata.append(
+                                    [
+                                        aws_account,
+                                        "redshift-serverless",
+                                        c["endpoint"]["address"],
+                                    ]
+                                )
+                        except KeyError:
+                            pass
+
+                        # Collect elasticache server Address
+                        client = boto3.client(
+                            "elasticache",
+                            aws_access_key_id=credentials["AccessKeyId"],
+                            aws_secret_access_key=credentials["SecretAccessKey"],
+                            aws_session_token=credentials["SessionToken"],
+                            region_name=r,
+                        )
+                        try:
+                            # redis replication groups
+                            for c in client.describe_replication_groups()[
+                                "ReplicationGroups"
+                            ]:
+                                for c in c["NodeGroups"]:
+                                    infradata.append(
+                                        [
+                                            aws_account,
+                                            "ecache",
+                                            c["PrimaryEndpoint"]["Address"],
+                                            r,
+                                        ]
+                                    )
+                                    infradata.append(
+                                        [
+                                            aws_account,
+                                            "ecache",
+                                            c["ReaderEndpoint"]["Address"],
+                                            r,
+                                        ]
+                                    )
+                                    for c in c["NodeGroupMembers"]:
+                                        infradata.append(
+                                            [
+                                                aws_account,
+                                                "ecache",
+                                                c["ReadEndpoint"]["Address"],
+                                                r,
+                                            ]
+                                        )
+
+                            # memcache and single redis nodes
+                            for c in client.describe_cache_clusters(
+                                ShowCacheNodeInfo=True,
+                                ShowCacheClustersNotInReplicationGroups=True,
+                            )["CacheClusters"]:
+                                if "ConfigurationEndpoint" in c:
+                                    infradata.append(
+                                        [
+                                            aws_account,
+                                            "ecache",
+                                            c["ConfigurationEndpoint"]["Address"],
+                                            r,
+                                        ]
+                                    )
+                                for c in c["CacheNodes"]:
+                                    infradata.append(
+                                        [
+                                            aws_account,
+                                            "ecache",
+                                            c["Endpoint"]["Address"],
+                                            r,
+                                        ]
+                                    )
+                        except KeyError:
+                            pass
+
                         click.echo(
                             "Completed collecting Infrastructure details from the account - "
                             + str(aws_account)
@@ -364,12 +449,21 @@ class aws:
                         aws_session_token=credentials["SessionToken"],
                         region_name="us-east-1",
                     )
-                    response = client.list_distributions()
                     try:
-                        for i in response["DistributionList"]["Items"]:
-                            infradata.append(
-                                [aws_account, "cloudront", clean_dns(i["DomainName"])]
-                            )
+                        paginator = client.get_paginator("list_distributions")
+                        for page in paginator.paginate():
+                            if (
+                                "DistributionList" in page
+                                and "Items" in page["DistributionList"]
+                            ):
+                                for i in page["DistributionList"]["Items"]:
+                                    infradata.append(
+                                        [
+                                            aws_account,
+                                            "cloudfront",
+                                            clean_dns(i["DomainName"]),
+                                        ]
+                                    )
                     except KeyError:
                         pass
                     client = boto3.client(
@@ -410,4 +504,4 @@ class aws:
 
 
 def clean_dns(dns):
-    return dns.rstrip(".").removeprefix("dualstack.")
+    return dns.rstrip(".").removeprefix("https://").removeprefix("dualstack.")
