@@ -83,67 +83,97 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        paginator = client.get_paginator('describe_instances')
+                        paginator = client.get_paginator("describe_instances")
 
                         for page in paginator.paginate():
-                        try:
-                            for reservation in page.get("Reservations", []):
-                                for instance in reservation.get("Instances", []):
-                                    for network_interface in instance.get("NetworkInterfaces", []):
-                                        association = network_interface.get("Association")
-                                        if association:
-                                            public_ip = association.get("PublicIp")
-                                            public_dns_name = association.get("PublicDnsName")
-                                            if public_ip:
-                                                infradata.append([aws_account, "ec2-ip", public_ip])
-                                            if public_dns_name:
-                                                infradata.append([aws_account, "ec2-ip", public_dns_name])
-                        except KeyError:
-                            pass
+                            try:
+                                for reservation in page.get("Reservations", []):
+                                    for instance in reservation.get("Instances", []):
+                                        for network_interface in instance.get(
+                                            "NetworkInterfaces", []
+                                        ):
+                                            association = network_interface.get(
+                                                "Association"
+                                            )
+                                            if association:
+                                                public_ip = association.get("PublicIp")
+                                                public_dns_name = association.get(
+                                                    "PublicDnsName"
+                                                )
+                                                if public_ip:
+                                                    infradata.append(
+                                                        [
+                                                            aws_account,
+                                                            "ec2-ip",
+                                                            public_ip,
+                                                        ]
+                                                    )
+                                                if public_dns_name:
+                                                    infradata.append(
+                                                        [
+                                                            aws_account,
+                                                            "ec2-ip",
+                                                            public_dns_name,
+                                                        ]
+                                                    )
+                            except KeyError:
+                                pass
 
-                        elb_client = boto3.client(
+                        client = boto3.client(
                             "elb",
                             aws_access_key_id=credentials["AccessKeyId"],
                             aws_secret_access_key=credentials["SecretAccessKey"],
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        response = elb_client.describe_load_balancers()
-                        try:
-                            for i in response["LoadBalancerDescriptions"]:
-                                infradata.append(
-                                    [aws_account, "elb", clean_dns(i["DNSName"])]
-                                )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("describe_load_balancers")
 
-                        elbv2_client = boto3.client(
+                        # Use the paginator to iterate through all pages of load balancers
+                        for page in paginator.paginate():
+                            try:
+                                for load_balancer in page.get(
+                                    "LoadBalancerDescriptions", []
+                                ):
+                                    dns_name = load_balancer.get("DNSName")
+                                    if dns_name:
+                                        infradata.append(
+                                            [aws_account, "elb", clean_dns(dns_name)]
+                                        )
+                            except KeyError:
+                                pass
+
+                        client = boto3.client(
                             "elbv2",
                             aws_access_key_id=credentials["AccessKeyId"],
                             aws_secret_access_key=credentials["SecretAccessKey"],
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        response = elbv2_client.describe_load_balancers()
-                        try:
-                            for i in response["LoadBalancers"]:
-                                infradata.append(
-                                    [aws_account, "elbv2", clean_dns(i["DNSName"])]
-                                )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("describe_load_balancers")
 
-                        beanstalk_client = boto3.client(
+                        for page in paginator.paginate():
+                            try:
+                                for load_balancer in page.get("LoadBalancers", []):
+                                    dns_name = load_balancer.get("DNSName")
+                                    if dns_name:
+                                        infradata.append(
+                                            [aws_account, "elbv2", clean_dns(dns_name)]
+                                        )
+                            except KeyError:
+                                pass
+
+                        client = boto3.client(
                             "elasticbeanstalk",
                             aws_access_key_id=credentials["AccessKeyId"],
                             aws_secret_access_key=credentials["SecretAccessKey"],
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        response = beanstalk_client.describe_applications()
+                        # not pageable
+                        response = client.describe_applications()
                         try:
                             for i in response["Applications"]:
-                                result = beanstalk_client.describe_environments(
+                                result = client.describe_environments(
                                     ApplicationName=i["ApplicationName"]
                                 )
                                 for j in result["Environments"]:
@@ -181,31 +211,43 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        response = client.describe_db_instances()
-                        try:
-                            for i in response["DBInstances"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "rds",
-                                        clean_dns(i["Endpoint"]["Address"]),
-                                    ]
-                                )
-                        except KeyError:
-                            pass
+                        paginator_instances = client.get_paginator(
+                            "describe_db_instances"
+                        )
 
-                        response = client.describe_db_cluster_endpoints()
-                        try:
-                            for i in response["DBClusterEndpoints"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "rds",
-                                        clean_dns(i["Endpoint"]),
-                                    ]
-                                )
-                        except KeyError:
-                            pass
+                        for page in paginator_instances.paginate():
+                            try:
+                                for db_instance in page.get("DBInstances", []):
+                                    endpoint_address = db_instance.get(
+                                        "Endpoint", {}
+                                    ).get("Address")
+                                    if endpoint_address:
+                                        infradata.append(
+                                            [
+                                                aws_account,
+                                                "rds",
+                                                clean_dns(endpoint_address),
+                                            ]
+                                        )
+                            except KeyError:
+                                pass
+
+                        paginator_clusters = client.get_paginator(
+                            "describe_db_cluster_endpoints"
+                        )
+
+                        for page in paginator_clusters.paginate():
+                            try:
+                                for db_cluster_endpoint in page.get(
+                                    "DBClusterEndpoints", []
+                                ):
+                                    endpoint = db_cluster_endpoint.get("Endpoint")
+                                    if endpoint:
+                                        infradata.append(
+                                            [aws_account, "rds", clean_dns(endpoint)]
+                                        )
+                            except KeyError:
+                                pass
 
                         # Collect VPC Endpoint Address
                         client = boto3.client(
@@ -215,15 +257,23 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        response = client.describe_vpc_endpoints()
-                        try:
-                            for i in response["VpcEndpoints"]:
-                                for dns in i["DnsEntries"]:
-                                    infradata.append(
-                                        [aws_account, "vpce", clean_dns(dns["DnsName"])]
-                                    )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("describe_vpc_endpoints")
+
+                        for page in paginator.paginate():
+                            try:
+                                for vpc_endpoint in page.get("VpcEndpoints", []):
+                                    for dns_entry in vpc_endpoint.get("DnsEntries", []):
+                                        dns_name = dns_entry.get("DnsName")
+                                        if dns_name:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "vpce",
+                                                    clean_dns(dns_name),
+                                                ]
+                                            )
+                            except KeyError:
+                                pass
 
                         # Collect ACM DNS Validation Address
                         client = boto3.client(
@@ -233,22 +283,35 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for cert in client.list_certificates()[
-                                "CertificateSummaryList"
-                            ]:
-                                for dvo in client.describe_certificate(
-                                    CertificateArn=cert["CertificateArn"]
-                                )["Certificate"]["DomainValidationOptions"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "acm",
-                                            clean_dns(dvo["ResourceRecord"]["Value"]),
-                                        ]
-                                    )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("list_certificates")
+
+                        for page in paginator.paginate():
+                            try:
+                                for cert in page.get("CertificateSummaryList", []):
+                                    certificate_arn = cert.get("CertificateArn")
+                                    if certificate_arn:
+                                        # Describe the certificate to get domain validation options
+                                        cert_details = client.describe_certificate(
+                                            CertificateArn=certificate_arn
+                                        )
+                                        domain_validation_options = cert_details.get(
+                                            "Certificate", {}
+                                        ).get("DomainValidationOptions", [])
+                                        for dvo in domain_validation_options:
+                                            resource_record = dvo.get(
+                                                "ResourceRecord", {}
+                                            )
+                                            dns_value = resource_record.get("Value")
+                                            if dns_value:
+                                                infradata.append(
+                                                    [
+                                                        aws_account,
+                                                        "acm",
+                                                        clean_dns(dns_value),
+                                                    ]
+                                                )
+                            except KeyError:
+                                pass
 
                         # Collect SES DKIM Validation Address
                         client = boto3.client(
@@ -258,22 +321,28 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for identity in client.list_email_identities()[
-                                "EmailIdentities"
-                            ]:
-                                for token in client.get_email_identity(
-                                    EmailIdentity=identity["IdentityName"]
-                                )["DkimAttributes"]["Tokens"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "ses",
-                                            "{0}.dkim.amazonses.com".format(token),
-                                        ]
-                                    )
-                        except KeyError:
-                            pass
+                        for page in paginator.paginate():
+                            try:
+                                for identity in page.get("EmailIdentities", []):
+                                    identity_name = identity.get("IdentityName")
+                                    if identity_name:
+                                        # Get the DKIM attributes for each email identity
+                                        identity_details = client.get_email_identity(
+                                            EmailIdentity=identity_name
+                                        )
+                                        dkim_tokens = identity_details.get(
+                                            "DkimAttributes", {}
+                                        ).get("Tokens", [])
+                                        for token in dkim_tokens:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "ses",
+                                                    f"{token}.dkim.amazonses.com",
+                                                ]
+                                            )
+                            except KeyError:
+                                pass
 
                         # Collect api gateway Address
                         client = boto3.client(
@@ -283,18 +352,27 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for domain_name in client.get_domain_names()["Items"]:
-                                for dnc in domain_name["DomainNameConfigurations"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "apigw",
-                                            dnc["ApiGatewayDomainName"],
-                                        ]
-                                    )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("get_domain_names")
+
+                        for page in paginator.paginate():
+                            try:
+                                for domain_name in page.get("Items", []):
+                                    for dnc in domain_name.get(
+                                        "DomainNameConfigurations", []
+                                    ):
+                                        api_gateway_domain_name = dnc.get(
+                                            "ApiGatewayDomainName"
+                                        )
+                                        if api_gateway_domain_name:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "apigw",
+                                                    api_gateway_domain_name,
+                                                ]
+                                            )
+                            except KeyError:
+                                pass
 
                         # Collect transfer family server Address
                         client = boto3.client(
@@ -304,19 +382,19 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for server in client.list_servers()["Servers"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "transfer",
-                                        "{0}.server.transfer.{1}.amazonaws.com".format(
-                                            server["ServerId"], r
-                                        ),
-                                    ]
-                                )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("list_servers")
+
+                        for page in paginator.paginate():
+                            try:
+                                for server in page.get("Servers", []):
+                                    server_id = server.get("ServerId")
+                                    if server_id:
+                                        endpoint = f"{server_id}.server.transfer.{r}.amazonaws.com"
+                                        infradata.append(
+                                            [aws_account, "transfer", endpoint]
+                                        )
+                            except KeyError:
+                                pass
 
                         # Collect redshift server Address
                         client = boto3.client(
@@ -326,17 +404,21 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for c in client.describe_clusters()["Clusters"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "redshift",
-                                        c["Endpoint"]["Address"],
-                                    ]
-                                )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("describe_clusters")
+
+                        # Use the paginator to iterate through all pages of clusters
+                        for page in paginator.paginate():
+                            try:
+                                for cluster in page.get("Clusters", []):
+                                    endpoint_address = cluster.get("Endpoint", {}).get(
+                                        "Address"
+                                    )
+                                    if endpoint_address:
+                                        infradata.append(
+                                            [aws_account, "redshift", endpoint_address]
+                                        )
+                            except KeyError:
+                                pass
 
                         # Collect redshift serverless Address
                         client = boto3.client(
@@ -346,19 +428,26 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            for c in client.list_workgroups()["workgroups"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "redshift-serverless",
-                                        c["endpoint"]["address"],
-                                    ]
-                                )
-                        except KeyError:
-                            pass
+                        paginator = client.get_paginator("list_workgroups")
 
-                        # Collect elasticache server Address
+                        for page in paginator.paginate():
+                            try:
+                                for workgroup in page.get("workgroups", []):
+                                    endpoint_address = workgroup.get(
+                                        "endpoint", {}
+                                    ).get("address")
+                                    if endpoint_address:
+                                        infradata.append(
+                                            [
+                                                aws_account,
+                                                "redshift-serverless",
+                                                endpoint_address,
+                                            ]
+                                        )
+                            except KeyError:
+                                pass
+                            
+                        # Collect elasticache Address
                         client = boto3.client(
                             "elasticache",
                             aws_access_key_id=credentials["AccessKeyId"],
@@ -366,63 +455,104 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        try:
-                            # redis replication groups
-                            for c in client.describe_replication_groups()[
-                                "ReplicationGroups"
-                            ]:
-                                for c in c["NodeGroups"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "ecache",
-                                            c["PrimaryEndpoint"]["Address"],
-                                            r,
-                                        ]
-                                    )
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "ecache",
-                                            c["ReaderEndpoint"]["Address"],
-                                            r,
-                                        ]
-                                    )
-                                    for c in c["NodeGroupMembers"]:
+                        
+                        paginator_replication = client.get_paginator(
+                            "describe_replication_groups"
+                        )
+
+                        for page in paginator_replication.paginate():
+                            try:
+                                for replication_group in page.get(
+                                    "ReplicationGroups", []
+                                ):
+                                    for node_group in replication_group.get(
+                                        "NodeGroups", []
+                                    ):
+                                        primary_endpoint = node_group.get(
+                                            "PrimaryEndpoint", {}
+                                        ).get("Address")
+                                        reader_endpoint = node_group.get(
+                                            "ReaderEndpoint", {}
+                                        ).get("Address")
+
+                                        if primary_endpoint:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "ecache",
+                                                    primary_endpoint,
+                                                    r,
+                                                ]
+                                            )
+                                        if reader_endpoint:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "ecache",
+                                                    reader_endpoint,
+                                                    r,
+                                                ]
+                                            )
+
+                                        for node_group_member in node_group.get(
+                                            "NodeGroupMembers", []
+                                        ):
+                                            read_endpoint = node_group_member.get(
+                                                "ReadEndpoint", {}
+                                            ).get("Address")
+                                            if read_endpoint:
+                                                infradata.append(
+                                                    [
+                                                        aws_account,
+                                                        "ecache",
+                                                        read_endpoint,
+                                                        r,
+                                                    ]
+                                                )
+                            except KeyError:
+                                pass
+
+                        paginator_clusters = client.get_paginator(
+                            "describe_cache_clusters"
+                        )
+
+                        for page in paginator_clusters.paginate(
+                            ShowCacheNodeInfo=True,
+                            ShowCacheClustersNotInReplicationGroups=True,
+                        ):
+                            try:
+                                for cache_cluster in page.get("CacheClusters", []):
+                                    configuration_endpoint = cache_cluster.get(
+                                        "ConfigurationEndpoint", {}
+                                    ).get("Address")
+
+                                    if configuration_endpoint:
                                         infradata.append(
                                             [
                                                 aws_account,
                                                 "ecache",
-                                                c["ReadEndpoint"]["Address"],
+                                                configuration_endpoint,
                                                 r,
                                             ]
                                         )
 
-                            # memcache and single redis nodes
-                            for c in client.describe_cache_clusters(
-                                ShowCacheNodeInfo=True,
-                                ShowCacheClustersNotInReplicationGroups=True,
-                            )["CacheClusters"]:
-                                if "ConfigurationEndpoint" in c:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "ecache",
-                                            c["ConfigurationEndpoint"]["Address"],
-                                            r,
-                                        ]
-                                    )
-                                for c in c["CacheNodes"]:
-                                    infradata.append(
-                                        [
-                                            aws_account,
-                                            "ecache",
-                                            c["Endpoint"]["Address"],
-                                            r,
-                                        ]
-                                    )
-                        except KeyError:
-                            pass
+                                    for cache_node in cache_cluster.get(
+                                        "CacheNodes", []
+                                    ):
+                                        endpoint = cache_node.get("Endpoint", {}).get(
+                                            "Address"
+                                        )
+                                        if endpoint:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "ecache",
+                                                    endpoint,
+                                                    r,
+                                                ]
+                                            )
+                            except KeyError:
+                                pass
 
                         click.echo(
                             "Completed collecting Infrastructure details from the account - "
