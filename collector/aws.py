@@ -1,6 +1,7 @@
 import boto3
 import botocore
 import click
+import json
 
 
 # get data from configured regions
@@ -23,42 +24,103 @@ class aws:
                     aws_secret_access_key=credentials["SecretAccessKey"],
                     aws_session_token=credentials["SessionToken"],
                 )
-                response = client.list_hosted_zones()["HostedZones"]
 
-                for i in response:
-                    # if i["Config"]["PrivateZone"] is False:
-                    record = client.list_resource_record_sets(HostedZoneId=i["Id"])[
-                        "ResourceRecordSets"
-                    ]
-                    for j in record:
-                        if (
-                            j["Type"] == "A"
-                            or j["Type"] == "AAAA"
-                            or j["Type"] == "CNAME"
-                        ):
-                            if j.get("ResourceRecords") is not None:
-                                for k in j.get("ResourceRecords"):
-                                    dnsdata.append(
-                                        [
-                                            aws_account,
-                                            clean_dns(j["Name"]),
-                                            clean_dns(k["Value"]),
+                paginator_zones = client.get_paginator("list_hosted_zones")
+
+                # Use the paginator to iterate through all pages of hosted zones
+                for page in paginator_zones.paginate():
+                    hosted_zones = page.get("HostedZones", [])
+                    for zone in hosted_zones:
+                        hosted_zone_id = zone.get("Id")
+                        if hosted_zone_id:
+                            # Create a paginator for the list_resource_record_sets method
+                            paginator_records = client.get_paginator(
+                                "list_resource_record_sets"
+                            )
+
+                            # Use the paginator to iterate through all pages of resource record sets
+                            for record_page in paginator_records.paginate(
+                                HostedZoneId=hosted_zone_id
+                            ):
+                                record_sets = record_page.get("ResourceRecordSets", [])
+                                for record in record_sets:
+                                    # Check if the record is associated with a Traffic Policy
+                                    if "TrafficPolicyInstanceId" in record:
+                                        traffic_policy_instance_id = record[
+                                            "TrafficPolicyInstanceId"
                                         ]
-                                    )
+                                        aws.extract_endpoints_from_policy_instance(
+                                            client,
+                                            traffic_policy_instance_id,
+                                            aws_account,
+                                            record["Name"],
+                                            dnsdata,
+                                        )
+                                    else:
+                                        # Handle regular records of type A, AAAA, CNAME
+                                        if record["Type"] in ["A", "AAAA", "CNAME"]:
+                                            if (
+                                                record.get("ResourceRecords")
+                                                is not None
+                                            ):
+                                                for resource_record in record.get(
+                                                    "ResourceRecords"
+                                                ):
+                                                    dnsdata.append(
+                                                        [
+                                                            aws_account,
+                                                            clean_dns(record["Name"]),
+                                                            clean_dns(
+                                                                resource_record["Value"]
+                                                            ),
+                                                        ]
+                                                    )
 
-                            if j.get("AliasTarget") is not None:
-                                dnsdata.append(
-                                    [
-                                        aws_account,
-                                        clean_dns(j["Name"]),
-                                        clean_dns(j.get("AliasTarget")["DNSName"]),
-                                    ]
-                                )
+                                            if record.get("AliasTarget") is not None:
+                                                dnsdata.append(
+                                                    [
+                                                        aws_account,
+                                                        clean_dns(record["Name"]),
+                                                        clean_dns(
+                                                            record.get("AliasTarget")[
+                                                                "DNSName"
+                                                            ]
+                                                        ),
+                                                    ]
+                                                )
             else:
                 click.echo(
                     f"Please check the AWS Account number {aws_account}. It does seem to be invalid."
                 )
         return dnsdata
+
+    def extract_endpoints_from_policy_instance(
+        client, policy_instance_id, aws_account, record_name, dnsdata
+    ):
+        # Retrieve the traffic policy instance
+        policy_instance = client.get_traffic_policy_instance(Id=policy_instance_id)
+        policy_id = policy_instance.get("TrafficPolicyInstance").get("TrafficPolicyId")
+        policy_version = policy_instance.get("TrafficPolicyInstance").get(
+            "TrafficPolicyVersion"
+        )
+
+        # Retrieve the traffic policy
+        policy_details = client.get_traffic_policy(Id=policy_id, Version=policy_version)
+        policy_document = policy_details.get("TrafficPolicy", {}).get("Document")
+
+        if policy_document:
+            # Parse the JSON document
+            policy_json = json.loads(policy_document)
+            aws.extract_endpoints_from_policy(
+                policy_json, aws_account, record_name, dnsdata
+            )
+
+    def extract_endpoints_from_policy(policy_json, aws_account, record_name, dnsdata):
+        # Traverse the policy document to extract endpoint values
+        for endpoint in policy_json.get("Endpoints", {}).values():
+            value = endpoint.get("Value")
+            if value:
+                dnsdata.append([aws_account, clean_dns(record_name), clean_dns(value)])
 
     def infra(accounts, regions, iamrole):
         infradata = []
@@ -116,6 +178,21 @@ class aws:
                                                             public_dns_name,
                                                         ]
                                                     )
+                                            # Extract IPv6 addresses
+                                            ipv6_addresses = network_interface.get(
+                                                "Ipv6Addresses", []
+                                            )
+                                            for ipv6 in ipv6_addresses:
+                                                ipv6_address = ipv6.get("Ipv6Address")
+                                                if ipv6_address:
+                                                    infradata.append(
+                                                        [
+                                                            aws_account,
+                                                            "ec2-ipv6",
+                                                            ipv6_address,
+                                                        ]
+                                                    )
+
                             except KeyError:
                                 pass
 
@@ -321,28 +398,30 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        for page in paginator.paginate():
-                            try:
-                                for identity in page.get("EmailIdentities", []):
-                                    identity_name = identity.get("IdentityName")
-                                    if identity_name:
-                                        # Get the DKIM attributes for each email identity
-                                        identity_details = client.get_email_identity(
-                                            EmailIdentity=identity_name
+                        try:
+
+                            for identity in client.list_email_identities(PageSize=1000)[
+                                "EmailIdentities"
+                            ]:
+
+                                identity_name = identity.get("IdentityName")
+                                if identity_name:
+                                    identity_details = client.get_email_identity(
+                                        EmailIdentity=identity_name
+                                    )
+                                    dkim_tokens = identity_details.get(
+                                        "DkimAttributes", {}
+                                    ).get("Tokens", [])
+                                    for token in dkim_tokens:
+                                        infradata.append(
+                                            [
+                                                aws_account,
+                                                "ses",
+                                                f"{token}.dkim.amazonses.com",
+                                            ]
                                         )
-                                        dkim_tokens = identity_details.get(
-                                            "DkimAttributes", {}
-                                        ).get("Tokens", [])
-                                        for token in dkim_tokens:
-                                            infradata.append(
-                                                [
-                                                    aws_account,
-                                                    "ses",
-                                                    f"{token}.dkim.amazonses.com",
-                                                ]
-                                            )
-                            except KeyError:
-                                pass
+                        except KeyError:
+                            pass
 
                         # Collect api gateway Address
                         client = boto3.client(
@@ -392,6 +471,27 @@ class aws:
                                         endpoint = f"{server_id}.server.transfer.{r}.amazonaws.com"
                                         infradata.append(
                                             [aws_account, "transfer", endpoint]
+                                        )
+                            except KeyError:
+                                pass
+
+                        # Collect sagemaker domains
+                        client = boto3.client(
+                            "sagemaker",
+                            aws_access_key_id=credentials["AccessKeyId"],
+                            aws_secret_access_key=credentials["SecretAccessKey"],
+                            aws_session_token=credentials["SessionToken"],
+                            region_name=r,
+                        )
+                        paginator = client.get_paginator("list_domains")
+
+                        for page in paginator.paginate():
+                            try:
+                                for domain in page.get("Domains", []):
+                                    url = domain.get("Url")
+                                    if url:
+                                        infradata.append(
+                                            [aws_account, "sagemaker", url]
                                         )
                             except KeyError:
                                 pass
@@ -446,7 +546,7 @@ class aws:
                                         )
                             except KeyError:
                                 pass
-                            
+
                         # Collect elasticache Address
                         client = boto3.client(
                             "elasticache",
@@ -455,7 +555,7 @@ class aws:
                             aws_session_token=credentials["SessionToken"],
                             region_name=r,
                         )
-                        
+
                         paginator_replication = client.get_paginator(
                             "describe_replication_groups"
                         )
@@ -603,22 +703,35 @@ class aws:
                         aws_session_token=credentials["SessionToken"],
                         region_name="us-east-1",
                     )
-                    try:
-                        for cert in client.list_certificates()[
-                            "CertificateSummaryList"
-                        ]:
-                            for dvo in client.describe_certificate(
-                                CertificateArn=cert["CertificateArn"]
-                            )["Certificate"]["DomainValidationOptions"]:
-                                infradata.append(
-                                    [
-                                        aws_account,
-                                        "acm",
-                                        clean_dns(dvo["ResourceRecord"]["Value"]),
-                                    ]
-                                )
-                    except KeyError:
-                        pass
+                    paginator = client.get_paginator("list_certificates")
+
+                    for page in paginator.paginate():
+                        try:
+                            for cert in page.get("CertificateSummaryList", []):
+                                certificate_arn = cert.get("CertificateArn")
+                                if certificate_arn:
+                                    # Describe the certificate to get domain validation options
+                                    cert_details = client.describe_certificate(
+                                        CertificateArn=certificate_arn
+                                    )
+                                    domain_validation_options = cert_details.get(
+                                        "Certificate", {}
+                                    ).get("DomainValidationOptions", [])
+                                    for dvo in domain_validation_options:
+                                        resource_record = dvo.get(
+                                            "ResourceRecord", {}
+                                        )
+                                        dns_value = resource_record.get("Value")
+                                        if dns_value:
+                                            infradata.append(
+                                                [
+                                                    aws_account,
+                                                    "acm",
+                                                    clean_dns(dns_value),
+                                                ]
+                                            )
+                        except KeyError:
+                            pass
                 except botocore.exceptions.ClientError:
                     click.echo(
                         "Could not collect Infrastructure details from the account - "
