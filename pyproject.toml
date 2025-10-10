@@ -75,5 +75,4 @@ findmytakeover = "findmytakeover.cli:main"
 [tool.setuptools]
 packages = ["findmytakeover", "findmytakeover.collector"]
 
-[tool.setuptools.package-data]
-findmytakeover = ["*.config"]
+
