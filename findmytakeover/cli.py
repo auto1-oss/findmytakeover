@@ -148,21 +148,21 @@ def main():
     # parse the provider and invoke appropriate collector
     for d in dns:
         if d == "aws":
-            from collector.aws import aws
+            from findmytakeover.collector.aws import aws
 
             awsdns = aws.dns(dns["aws"]["accounts"], dns["aws"]["credentials"])
             for f in awsdns:
                 recordlist.append(["Amazon Web Services", f[0], f[1], f[2]])
 
         elif d == "gcp":
-            from collector.gcp import gcp
+            from findmytakeover.collector.gcp import gcp
 
             gcpdns = gcp.dns(dns["gcp"]["accounts"], dns["gcp"]["credentials"])
             for f in gcpdns:
                 recordlist.append(["Google Cloud Platform", f[0], f[1], f[2]])
 
         elif d == "azure":
-            from collector.msazure import azure
+            from findmytakeover.collector.msazure import azure
 
             azuredns = azure.dns(dns["azure"]["accounts"], dns["azure"]["credentials"])
             for f in azuredns:
@@ -178,7 +178,7 @@ def main():
 
     for i in infra:
         if i == "aws":
-            from collector.aws import aws
+            from findmytakeover.collector.aws import aws
 
             awsinfra = aws.infra(
                 infra["aws"]["accounts"],
@@ -189,14 +189,14 @@ def main():
                 infrastructurelist.append(["Amazon Web Services", f[0], f[1], f[2]])
 
         elif i == "gcp":
-            from collector.gcp import gcp
+            from findmytakeover.collector.gcp import gcp
 
             gcpinfra = gcp.infra(infra["gcp"]["accounts"], infra["gcp"]["credentials"])
             for f in gcpinfra:
                 infrastructurelist.append(["Google Cloud Platform", f[0], f[1], f[2]])
 
         elif i == "azure":
-            from collector.msazure import azure
+            from findmytakeover.collector.msazure import azure
 
             azureinfra = azure.infra(
                 dns["azure"]["accounts"], dns["azure"]["credentials"]
@@ -255,7 +255,7 @@ def main():
         )
         result = result[~ip_mask]
 
-        print("⚠️  Dangling DNS records (Record | Value | Account):")
+        print("⚠️  Dangling DNS records (Record | Value | Provider | Identifier):")
         found_results = False
         for i in result.index:
             if result["value"][i] == "":
@@ -265,6 +265,7 @@ def main():
                     + str(result["dnsvalue"][i])
                     + " | "
                     + str(result["csp_x"][i])
+                    + " | "
                     + str(result["account_x"][i])
                 )
                 found_results = True
