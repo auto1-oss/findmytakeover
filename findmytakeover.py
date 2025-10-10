@@ -2,10 +2,10 @@
 
 import argparse
 import yaml
-import click
 import os
 import pandas as pd
 import ipaddress
+from tqdm import tqdm
 
 
 def readConfig(data):
@@ -19,7 +19,7 @@ def readConfig(data):
     try:
         config = yaml.safe_load(cf)
     except yaml.YAMLError:
-        print("Invalid YAML file!")
+        print("❌ Invalid YAML file!")
         exit(1)
 
     # Reading the configuration file for runtime configuration
@@ -34,8 +34,8 @@ def readConfig(data):
                     exclude_domains.append(str(domains))
 
     except KeyError:
-        click.echo(
-            "Invalid Configuration! please check the findmytakeover section in configuration file."
+        print(
+            "❌ Invalid Configuration! please check the findmytakeover section in configuration file."
         )
         exit(1)
 
@@ -51,21 +51,21 @@ def readConfig(data):
                     if None in dnsprovider[i].values():
                         raise KeyError
         else:
-            click.echo(
-                "Invalid Configuration! please check that DNS provider is configured."
+            print(
+                "❌ Invalid Configuration! please check that DNS provider is configured."
             )
 
         if dnsprovider == {}:
-            click.echo(
-                "Invalid Configuration! please check atleast one DNS provider needs to be enabled."
+            print(
+                "❌ Invalid Configuration! please check atleast one DNS provider needs to be enabled."
             )
 
         if None in dnsprovider.values():
             raise KeyError
 
     except KeyError:
-        click.echo(
-            "Invalid Configuration! please check the DNS section in configuration file."
+        print(
+            "❌ Invalid Configuration! please check the DNS section in configuration file."
         )
         exit(1)
 
@@ -82,21 +82,21 @@ def readConfig(data):
                     if None in infraprovider[i].values():
                         raise KeyError
         else:
-            click.echo(
-                "Invalid Configuration! please check that Infrastructure provider is configured."
+            print(
+                "❌ Invalid Configuration! please check that Infrastructure provider is configured."
             )
 
         if infraprovider == {}:
-            click.echo(
-                "Invalid Configuration! please check atleast one Infrastructure provider needs to be enabled."
+            print(
+                "❌ Invalid Configuration! please check atleast one Infrastructure provider needs to be enabled."
             )
 
         if None in infraprovider.values():
             raise KeyError
 
     except KeyError:
-        click.echo(
-            "Invalid Configuration! please check the Infrastructure section in configuration file."
+        print(
+            "❌ Invalid Configuration! please check the Infrastructure section in configuration file."
         )
         exit(1)
 
@@ -115,7 +115,7 @@ def main():
                                     |___/                                       
         """
 
-    click.secho(CLI_PROMPT, bold=True, fg="green")
+    print("\033[92m" + CLI_PROMPT + "\033[0m")  # Green color
 
     # Read the arguments that have been passed in to the program.
     parser = argparse.ArgumentParser()
@@ -137,7 +137,7 @@ def main():
 
     args = parser.parse_args()
 
-    click.echo("Reading the config from file - " + args.config_file)
+    print("📖 Reading the config from file - " + args.config_file)
     dns, infra, exclude_cidrs, exclude_domains = readConfig(args.config_file)
 
     # print(dns, infra, exclude)
@@ -216,13 +216,13 @@ def main():
 
     # Dumping data
     if args.dump_file:
-        print("Dumping data at file at - " + args.dump_file)
+        print("💾 Dumping data at file at - " + args.dump_file)
         infrastructure.to_csv(args.dump_file, mode="a")
         with open(args.dump_file, "a") as f:
             f.write("--" * 50)
         records.to_csv(args.dump_file, mode="a")
 
-    click.echo("Checking for possible dangling DNS records...")
+    print("🔍 Checking for possible dangling DNS records...")
     if dns != {} or infra != {}:
         # filter out the records which internally forward to different dns record or where forwarded record would get matched by wildcard
         for dnskey in records["dnskey"]:
@@ -240,12 +240,12 @@ def main():
             how="left",
         ).fillna(value="")
 
-        click.echo("Reducing records to dangling ones...")
+        print("🔬 Reducing records to dangling ones...")
         dangling_mask = result["value"].apply(lambda x: x != "")
         result = result[~dangling_mask]
 
         # Checking for exclusions in the results
-        click.echo("Removing excluded IPs and domains...")
+        print("🧹 Removing excluded IPs and domains...")
         for exclude in exclude_domains:
             domain_mask = result["dnsvalue"].str.contains(exclude)
             result = result[~domain_mask]
@@ -255,25 +255,23 @@ def main():
         )
         result = result[~ip_mask]
 
-        click.echo("Printing danglind DNS records:")
+        print("⚠️  Dangling DNS records (Record | Value | Account):")
         found_results = False
         for i in result.index:
             if result["value"][i] == "":
-                click.echo(
-                    "Found dangling DNS record - "
-                    + str(result["dnskey"][i])
-                    + " with the value "
+                print(
+                    str(result["dnskey"][i])
+                    + " | "
                     + str(result["dnsvalue"][i])
-                    + " in "
+                    + " | "
                     + str(result["csp_x"][i])
-                    + " cloud in the account/subscription/project - "
                     + str(result["account_x"][i])
                 )
                 found_results = True
         exit(code=found_results)
     else:
         print(
-            "To check for dangling domains, both DNS and Infrastructure provider needs to be configured."
+            "❌ To check for dangling domains, both DNS and Infrastructure provider needs to be configured."
         )
 
 
