@@ -1,123 +1,196 @@
 # findmytakeover
 
-findmytakeover detects dangling DNS record in a multi cloud environment. It does this by scanning all the DNS zones and the infrastructure present within the configured cloud service provider either in a single account or multiple accounts and finding the DNS record for which the infrastructure behind it does not exist anymore rather than using wordlist. It can easily detect and report potential subdomain takeovers that exist. 
+Detects dangling DNS records and potential subdomain takeovers across AWS, Azure, and GCP.
 
-This tool is not tested to run on non commercial Cloud Service Provider regions like AWS GovCloud, Azure Government or Google for Government but should be able to run without any issues. 
+findmytakeover scans DNS zones and cloud infrastructure to find DNS records pointing to non-existent resources, identifying potential subdomain takeover vulnerabilities.
 
-![findmytakeover](findmytakeover.jpg "findmytakeover")
-
-## Why?
-They are a threat because they allow attackers to host infrastructure behind your domain which can be used for any sort of puropose and getting the entire traffic to an attacker-controlled domain with complete access to the domain’s content and resources.
-
-This can become a breeding ground for malicious resources manipulated by an attacker that the domain owner has no control over. This means that the attacker can completely exercise dominance over the domain name to run an illegal service, launch phishing campaigns on unsuspecting victims and malign your organization’s good name in the market. 
- 
 ## Installation
 
-There are depencies that are required to be installed based on the cloud provider that have been configured. 
-```
-git clone https://github.com/anirudhbiyani/findmytakeover.git
-cd findmytakeover/
-python3 -m venv findmytakeover
-source findmytakeover/bin/activate
-pip3 install -r requirements.txt
+### 1. Setup Authentication
+
+Add to `~/.zshrc` or `~/.bashrc`:
+
+```bash
+export ARTIFACTORY_USERNAME="your-username"
+export ARTIFACTORY_PASSWORD="your-access-token"
 ```
 
-## Dependencies
-Depending on the cloud provider, you would need permission read data. The following role would work for various cloud provider - 
-  - Amazon Web Services - ViewOnlyRole and SecurityAudit
-  - Microsoft Azure - Reader
-  - Google Cloud - Viewer
+Then reload:
+```bash
+source ~/.zshrc  # or source ~/.bashrc
+```
+
+### 2. Configure pip
+
+```bash
+./setup_pip.sh
+```
+
+### 3. Install
+
+```bash
+pip install findmytakeover
+```
+
+## Cloud Provider Permissions
+
+Required read-only permissions:
+
+- **AWS**: `ViewOnlyAccess` and `SecurityAudit` roles
+- **Azure**: `Reader` role  
+- **GCP**: `Viewer` role
 
 ## Usage
-```
-# ./findmytakeover.py --help
-usage: findmytakeover.py [-h] [-c CONFIG_FILE] [-d DUMP_FILE]
 
-options:
-  -h, --help            show this help message and exit
-  -c CONFIG_FILE, --config-file CONFIG_FILE
-                        Enter the path to the configuration file that you want the tool to use.
-  -d DUMP_FILE, --dump-file DUMP_FILE
-                        Enter the path to where all the DNS and Infrastructre data would be saved.
-```
-The default value of the configuiration file would be the same directory where the tool is located and the configuration file would look like this.
+```bash
+# Basic scan with default config
+findmytakeover
 
+# Use custom config file
+findmytakeover -c myconfig.yaml
 
-Thee configuration file looks like this. 
+# Save output to file
+findmytakeover -d output.json
+
+# Help
+findmytakeover --help
 ```
+
+## Configuration
+
+Create `findmytakeover.config` file:
+
+```yaml
 exclude:
   ipaddress:
     - 100.1.0.0/16
-  domains:
-    - google.com 
-    - example.com
-    
-dns:
+  
+cloud_providers:
   aws:
-    enabled: false/true
     accounts:
-      - 123456789012
-      - 098765432109
-      - 123123123123
-    credentials: <Name of IAM Role that would be assumed>
-
-  gcp:
-    enabled: true/false
-    credentials: <path to the service account's credentials file>
-    accounts: 
-      - project0
-      - project1
-      - project2
-
+      - name: production
+        role_arn: arn:aws:iam::123456789:role/ReadOnly
+      - name: staging
+        role_arn: arn:aws:iam::987654321:role/ReadOnly
+  
   azure:
-    enabled: false/true
-    credentials: <Service Account Key>
-    accounts:
-      - subscription1
-      - subscription2
-      - subscription3
-
-infra:
-  aws:
-    enabled: false/true
-    accounts:
-      - 123456789012
-      - 098765432109
-      - 123123123123
-    credentials: <Name of IAM Role that would be assumed>
-
+    subscriptions:
+      - subscription_id: xxxx-xxxx-xxxx
+        tenant_id: yyyy-yyyy-yyyy
+  
   gcp:
-    enabled: true/false
-    credentials: <path to the service account's credentials file>
-    accounts: 
-      - project0
-      - project1
-      - project2
-
-  azure:
-    enabled: false/true
-    credentials: <Service Account Key>
-    accounts:
-      - subscription1
-      - subscription2
-      - subscription3
+    projects:
+      - project_id: my-project-123
 ```
 
-## Limtitations 
-This tools cannot guarantee 100% protection against subdomain takeovers. This will not protect you from dangling NS designations at the moment.
+See `findmytakeover.config.example` for full configuration options.
 
-## Contributing
+## Output
 
-You can contribute to the project in many ways either by reporting bugs, writting documentation, or adding code.
+Results are saved as JSON with detected vulnerabilities:
 
-Contributions are welcome! If you would like to contribute, please follow these steps:
-  - Fork the repository.
-  - Create a new branch:
-    `$ git checkout -b feature/your-feature-name`
-  - Make your changes and commit them:
-    `$ git commit -m "Add your feature description"`
-  - Push your changes to the forked repository:
-    `$ git push origin feature/your-feature-name`
-  - Open a pull request to the main repository.
+```json
+{
+  "vulnerable_records": [
+    {
+      "domain": "app.example.com",
+      "record_type": "CNAME",
+      "target": "old-app.cloudprovider.com",
+      "vulnerability": "Dangling CNAME - target does not exist"
+    }
+  ]
+}
+```
 
-have any questions? hit it me on GitHub or Email.
+## Supported Services
+
+### AWS
+- S3 buckets
+- CloudFront distributions
+- Elastic Beanstalk
+- ELB/ALB
+- API Gateway
+- Route53
+
+### Azure
+- Storage accounts
+- CDN endpoints
+- App Services
+- Traffic Manager
+- API Management
+- Container instances
+
+### GCP
+- Cloud Storage
+- Cloud Functions
+- Compute Engine
+- Cloud Run
+- App Engine
+
+## Publishing
+
+```bash
+export ARTIFACTORY_ACCESS_TOKEN="your-token"
+./publish.sh
+```
+
+## Development
+
+```bash
+# Install in development mode
+make install
+
+# Build package
+make build
+
+# Run tests
+make test
+
+# Clean build artifacts
+make clean
+```
+
+## Why This Matters
+
+Dangling DNS records allow attackers to:
+- Host malicious content under your domain
+- Launch phishing campaigns
+- Damage your organization's reputation
+- Intercept traffic meant for your services
+
+## Requirements
+
+- Python 3.8+
+- Cloud provider credentials configured
+- Access to DNS zones in your cloud accounts
+
+## Troubleshooting
+
+**Package not found:**
+```bash
+# Re-run setup
+./setup_pip.sh
+
+# Or install directly
+pip install --index-url https://artifactory.prod.auto1.team/artifactory/api/pypi/devops-artifacts/simple findmytakeover
+```
+
+**No cloud credentials:**
+```bash
+# AWS
+aws configure
+
+# Azure
+az login
+
+# GCP
+gcloud auth application-default login
+```
+
+## License
+
+GPL-3.0
+
+## Credits
+
+Original tool by [anirudhbiyani](https://github.com/anirudhbiyani/findmytakeover)

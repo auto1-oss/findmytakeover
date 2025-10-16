@@ -14,24 +14,12 @@ def readConfig(data):
     exclude_cidrs = []
     exclude_domains = []
 
-    # Check if config file exists
-    if not os.path.exists(data):
-        print(f"❌ Error: Configuration file not found: {data}")
-        print("\nPlease provide a valid configuration file using -c/--config-file")
-        print(
-            "See findmytakeover.config.example in the repository for an example configuration."
-        )
-        exit(1)
-
     # Loading the YAML configuration
+    cf = open(data, "rt")
     try:
-        with open(data, "rt") as cf:
-            config = yaml.safe_load(cf)
-    except yaml.YAMLError as e:
-        print(f"❌ Invalid YAML file: {e}")
-        exit(1)
-    except Exception as e:
-        print(f"❌ Error reading configuration file: {e}")
+        config = yaml.safe_load(cf)
+    except yaml.YAMLError:
+        print("❌ Invalid YAML file!")
         exit(1)
 
     # Reading the configuration file for runtime configuration
@@ -135,9 +123,9 @@ def main():
     parser.add_argument(
         "-c",
         "--config-file",
-        required=True,
+        default=os.getcwd() + "/findmytakeover.config",
         type=str,
-        help="Path to the configuration file (REQUIRED). See findmytakeover.config.example for example.",
+        help="Enter the path to the configuration file that you want the tool to use.",
     )
 
     parser.add_argument(
@@ -149,14 +137,8 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"📖 Reading configuration from: {args.config_file}")
-    try:
-        dns, infra, exclude_cidrs, exclude_domains = readConfig(args.config_file)
-    except SystemExit:
-        raise
-    except Exception as e:
-        print(f"❌ Failed to read configuration: {e}")
-        exit(1)
+    print("📖 Reading the config from file - " + args.config_file)
+    dns, infra, exclude_cidrs, exclude_domains = readConfig(args.config_file)
 
     # print(dns, infra, exclude)
 
@@ -166,35 +148,37 @@ def main():
     # parse the provider and invoke appropriate collector
     for d in dns:
         if d == "aws":
-            from findmytakeover.collector.aws import aws
+            from .collector.aws import aws
 
             awsdns = aws.dns(dns["aws"]["accounts"], dns["aws"]["credentials"])
             for f in awsdns:
                 recordlist.append(["Amazon Web Services", f[0], f[1], f[2]])
 
         elif d == "gcp":
-            from findmytakeover.collector.gcp import gcp
+            from .collector.gcp import gcp
 
             gcpdns = gcp.dns(dns["gcp"]["accounts"], dns["gcp"]["credentials"])
             for f in gcpdns:
                 recordlist.append(["Google Cloud Platform", f[0], f[1], f[2]])
 
         elif d == "azure":
-            from findmytakeover.collector.msazure import azure
+            from .collector.msazure import azure
 
             azuredns = azure.dns(dns["azure"]["accounts"], dns["azure"]["credentials"])
             for f in azuredns:
                 recordlist.append(["Microsoft Azure", f[0], f[1], f[2]])
         else:
-            print(f"❌ Error: DNS provider '{d}' is not supported.")
-            print("   Supported providers: aws, gcp, azure")
-            exit(1)
+            print(
+                "The DNS provider configured"
+                + d
+                + "is not supported by the tool. Please read the documentation."
+            )
 
     records = pd.DataFrame(recordlist, columns=["csp", "account", "dnskey", "dnsvalue"])
 
     for i in infra:
         if i == "aws":
-            from findmytakeover.collector.aws import aws
+            from .collector.aws import aws
 
             awsinfra = aws.infra(
                 infra["aws"]["accounts"],
@@ -205,14 +189,14 @@ def main():
                 infrastructurelist.append(["Amazon Web Services", f[0], f[1], f[2]])
 
         elif i == "gcp":
-            from findmytakeover.collector.gcp import gcp
+            from .collector.gcp import gcp
 
             gcpinfra = gcp.infra(infra["gcp"]["accounts"], infra["gcp"]["credentials"])
             for f in gcpinfra:
                 infrastructurelist.append(["Google Cloud Platform", f[0], f[1], f[2]])
 
         elif i == "azure":
-            from findmytakeover.collector.msazure import azure
+            from .collector.msazure import azure
 
             azureinfra = azure.infra(
                 dns["azure"]["accounts"], dns["azure"]["credentials"]
@@ -220,9 +204,11 @@ def main():
             for f in azureinfra:
                 infrastructurelist.append(["Microsoft Azure", f[0], f[1], f[2]])
         else:
-            print(f"❌ Error: Infrastructure provider '{i}' is not supported.")
-            print("   Supported providers: aws, gcp, azure")
-            exit(1)
+            print(
+                "The Infrastructure provider configured"
+                + d
+                + "is not supported by the tool. Please read the documentation."
+            )
 
     infrastructure = pd.DataFrame(
         infrastructurelist, columns=["csp", "account", "service", "value"]
@@ -230,15 +216,11 @@ def main():
 
     # Dumping data
     if args.dump_file:
-        try:
-            print(f"💾 Saving data to: {args.dump_file}")
-            infrastructure.to_csv(args.dump_file, mode="a")
-            with open(args.dump_file, "a") as f:
-                f.write("--" * 50 + "\n")
-            records.to_csv(args.dump_file, mode="a")
-        except Exception as e:
-            print(f"❌ Error saving data to file: {e}")
-            exit(1)
+        print("💾 Dumping data at file at - " + args.dump_file)
+        infrastructure.to_csv(args.dump_file, mode="a")
+        with open(args.dump_file, "a") as f:
+            f.write("--" * 50)
+        records.to_csv(args.dump_file, mode="a")
 
     print("🔍 Checking for possible dangling DNS records...")
     if dns != {} or infra != {}:
